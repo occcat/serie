@@ -5,6 +5,7 @@ use std::{
         mpsc, Arc, Mutex,
     },
     thread,
+    time::{Duration, Instant},
 };
 
 use ratatui::crossterm::event::KeyEvent;
@@ -33,6 +34,7 @@ pub enum AppEvent {
     SelectParentCommit,
     CopyToClipboard { name: String, value: String },
     Refresh(RefreshViewContext),
+    AutoRefresh,
     ClearStatusLine,
     UpdateStatusInput(String, Option<u16>, Option<String>),
     UpdateStatusTransient(String),
@@ -81,10 +83,11 @@ pub struct EventController {
     rx: Receiver,
     stop: Arc<AtomicBool>,
     handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
+    auto_refresh: Option<Duration>,
 }
 
 impl EventController {
-    pub fn init() -> Self {
+    pub fn new(auto_refresh: Option<Duration>) -> Self {
         let (tx, rx) = mpsc::channel();
         let tx = Sender { tx };
         let rx = Receiver { rx };
@@ -94,6 +97,7 @@ impl EventController {
             rx,
             stop: Arc::new(AtomicBool::new(false)),
             handle: Arc::new(Mutex::new(None)),
+            auto_refresh,
         };
         controller.start();
 
@@ -104,30 +108,38 @@ impl EventController {
         self.stop.store(false, Ordering::Relaxed);
         let stop = self.stop.clone();
         let tx = self.tx.clone();
-        let handle = thread::spawn(move || loop {
-            if stop.load(Ordering::Relaxed) {
-                break;
-            }
-            match ratatui::crossterm::event::poll(std::time::Duration::from_millis(100)) {
-                Ok(true) => match ratatui::crossterm::event::read() {
-                    Ok(e) => match e {
-                        ratatui::crossterm::event::Event::Key(key) => {
-                            tx.send(AppEvent::Key(key));
-                        }
-                        ratatui::crossterm::event::Event::Resize(w, h) => {
-                            tx.send(AppEvent::Resize(w as usize, h as usize));
-                        }
-                        _ => {}
-                    },
-                    Err(e) => {
-                        panic!("Failed to read event: {e}");
-                    }
-                },
-                Ok(false) => {
-                    continue;
+        let auto_refresh = self.auto_refresh;
+        let handle = thread::spawn(move || {
+            let mut last_auto_refresh = Instant::now();
+            loop {
+                if stop.load(Ordering::Relaxed) {
+                    break;
                 }
-                Err(e) => {
-                    panic!("Failed to poll event: {e}");
+                match ratatui::crossterm::event::poll(Duration::from_millis(100)) {
+                    Ok(true) => match ratatui::crossterm::event::read() {
+                        Ok(e) => match e {
+                            ratatui::crossterm::event::Event::Key(key) => {
+                                tx.send(AppEvent::Key(key));
+                            }
+                            ratatui::crossterm::event::Event::Resize(w, h) => {
+                                tx.send(AppEvent::Resize(w as usize, h as usize));
+                            }
+                            _ => {}
+                        },
+                        Err(e) => {
+                            panic!("Failed to read event: {e}");
+                        }
+                    },
+                    Ok(false) => {}
+                    Err(e) => {
+                        panic!("Failed to poll event: {e}");
+                    }
+                }
+                if let Some(interval) = auto_refresh {
+                    if last_auto_refresh.elapsed() >= interval {
+                        tx.send(AppEvent::AutoRefresh);
+                        last_auto_refresh = Instant::now();
+                    }
                 }
             }
         });

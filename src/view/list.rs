@@ -215,6 +215,10 @@ impl<'a> ListView<'a> {
         self.as_list_state().graph_image_ids_sorted()
     }
 
+    pub fn session_nonce(&self) -> u32 {
+        self.as_list_state().session_nonce()
+    }
+
     fn update_search_status(&self, transient_message: Option<String>) {
         if let SearchState::Searching { .. } = self.as_list_state().search_state() {
             let list_state = self.as_list_state();

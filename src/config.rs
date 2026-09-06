@@ -13,6 +13,7 @@ use crate::{
     color::{ColorTheme, OptionalColorTheme},
     graph::GraphImageWidthMode,
     keybind::KeyBind,
+    search::SearchTarget,
     CommitOrderType, GraphStyle, GraphWidthType, ImageProtocolType, InitialSelection, Result,
 };
 
@@ -144,6 +145,8 @@ pub struct CoreGitConfig {
 #[optional(derives = [Deserialize])]
 #[derive(Debug, Clone, PartialEq, Eq, SmartDefault)]
 pub struct CoreSearchConfig {
+    #[default(SearchTarget::All)]
+    pub target: SearchTarget,
     #[default = false]
     pub ignore_case: bool,
     #[default = false]
@@ -453,6 +456,7 @@ mod tests {
                 },
                 git: CoreGitConfig { mailmap: false },
                 search: CoreSearchConfig {
+                    target: SearchTarget::All,
                     ignore_case: false,
                     fuzzy: false,
                 },
@@ -541,6 +545,7 @@ mod tests {
             [core.git]
             mailmap = true
             [core.search]
+            target = "author"
             ignore_case = true
             fuzzy = true
             [core.user_command]
@@ -587,6 +592,7 @@ mod tests {
                 },
                 git: CoreGitConfig { mailmap: true },
                 search: CoreSearchConfig {
+                    target: SearchTarget::Author,
                     ignore_case: true,
                     fuzzy: true,
                 },
@@ -701,6 +707,7 @@ mod tests {
                 },
                 git: CoreGitConfig { mailmap: false },
                 search: CoreSearchConfig {
+                    target: SearchTarget::All,
                     ignore_case: false,
                     fuzzy: false,
                 },

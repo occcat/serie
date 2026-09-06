@@ -33,14 +33,28 @@ pub enum AppEvent {
     SelectNewerCommit,
     SelectOlderCommit,
     SelectParentCommit,
-    CopyToClipboard { name: String, value: String },
+    CopyToClipboard {
+        name: String,
+        value: String,
+    },
     Refresh(RefreshViewContext),
     AutoRefresh,
     ClearStatusLine,
-    UpdateStatusInput(String, Option<u16>, Option<String>),
+    UpdateStatusInput {
+        message: String,
+        cursor_position: u16,
+        metadata: String,
+    },
     UpdateStatusTransient(String),
+    UpdateSearchResult {
+        message: String,
+        options: String,
+        matched: bool,
+    },
+    #[expect(dead_code)]
     NotifyInfo(String),
     NotifySuccess(String),
+    #[expect(dead_code)]
     NotifyWarn(String),
     NotifyError(String),
 }
@@ -267,6 +281,7 @@ pub enum UserEvent {
     RefList,
     Search,
     UserCommand(usize),
+    SearchTargetToggle,
     IgnoreCaseToggle,
     FuzzyToggle,
     Refresh,
@@ -330,6 +345,7 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "confirm" => Ok(UserEvent::Confirm),
                         "ref_list" | "ref_list_toggle" => Ok(UserEvent::RefList),
                         "search" => Ok(UserEvent::Search),
+                        "search_target_toggle" => Ok(UserEvent::SearchTargetToggle),
                         "ignore_case_toggle" => Ok(UserEvent::IgnoreCaseToggle),
                         "fuzzy_toggle" => Ok(UserEvent::FuzzyToggle),
                         "refresh" => Ok(UserEvent::Refresh),

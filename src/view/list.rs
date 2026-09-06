@@ -44,17 +44,21 @@ impl<'a> ListView<'a> {
                     self.as_mut_list_state().cancel_search();
                     self.clear_search_query();
                 }
+                UserEvent::SearchTargetToggle => {
+                    self.as_mut_list_state().toggle_search_target();
+                    self.update_search_status();
+                }
                 UserEvent::IgnoreCaseToggle => {
-                    let message = self.as_mut_list_state().toggle_ignore_case();
-                    self.update_search_status(Some(message));
+                    self.as_mut_list_state().toggle_ignore_case();
+                    self.update_search_status();
                 }
                 UserEvent::FuzzyToggle => {
-                    let message = self.as_mut_list_state().toggle_fuzzy();
-                    self.update_search_status(Some(message));
+                    self.as_mut_list_state().toggle_fuzzy();
+                    self.update_search_status();
                 }
                 _ => {
                     self.as_mut_list_state().handle_search_input(key);
-                    self.update_search_status(None);
+                    self.update_search_status();
                 }
             }
             return;
@@ -131,15 +135,19 @@ impl<'a> ListView<'a> {
                 }
                 UserEvent::Search => {
                     self.as_mut_list_state().start_search();
-                    self.update_search_status(None);
+                    self.update_search_status();
+                }
+                UserEvent::SearchTargetToggle => {
+                    self.as_mut_list_state().toggle_search_target();
+                    self.update_search_options_message();
                 }
                 UserEvent::IgnoreCaseToggle => {
-                    let message = self.as_mut_list_state().toggle_ignore_case();
-                    self.tx.send(AppEvent::UpdateStatusTransient(message));
+                    self.as_mut_list_state().toggle_ignore_case();
+                    self.update_search_options_message();
                 }
                 UserEvent::FuzzyToggle => {
-                    let message = self.as_mut_list_state().toggle_fuzzy();
-                    self.tx.send(AppEvent::UpdateStatusTransient(message));
+                    self.as_mut_list_state().toggle_fuzzy();
+                    self.update_search_options_message();
                 }
                 UserEvent::UserCommand(n) => {
                     self.tx.send(AppEvent::OpenUserCommand(n));
@@ -219,17 +227,29 @@ impl<'a> ListView<'a> {
         self.as_list_state().session_nonce()
     }
 
-    fn update_search_status(&self, transient_message: Option<String>) {
+    fn update_search_status(&self) {
         if let SearchState::Searching { .. } = self.as_list_state().search_state() {
             let list_state = self.as_list_state();
             if let Some(query) = list_state.search_query_string() {
-                let cursor_pos = list_state.search_query_cursor_position();
-                self.tx.send(AppEvent::UpdateStatusInput(
-                    query,
-                    Some(cursor_pos),
-                    transient_message,
-                ));
+                let cursor_position = list_state.search_query_cursor_position();
+                let options = list_state.search_options().status_string();
+                self.tx.send(AppEvent::UpdateStatusInput {
+                    message: query,
+                    cursor_position,
+                    metadata: options,
+                });
             }
+        }
+    }
+
+    fn update_search_options_message(&self) {
+        if let SearchState::Applied { .. } = self.as_list_state().search_state() {
+            self.update_matched_message();
+        } else {
+            let options = self.as_list_state().search_options().status_string();
+            self.tx.send(AppEvent::UpdateStatusTransient(format!(
+                "Search: {options}"
+            )));
         }
     }
 
@@ -239,11 +259,12 @@ impl<'a> ListView<'a> {
 
     fn update_matched_message(&self) {
         if let Some((msg, matched)) = self.as_list_state().matched_query_string() {
-            if matched {
-                self.tx.send(AppEvent::NotifyInfo(msg));
-            } else {
-                self.tx.send(AppEvent::NotifyWarn(msg));
-            }
+            let options = self.as_list_state().search_options().status_string();
+            self.tx.send(AppEvent::UpdateSearchResult {
+                message: msg,
+                options,
+                matched,
+            });
         } else {
             self.tx.send(AppEvent::ClearStatusLine);
         }
@@ -293,6 +314,10 @@ impl<'a> ListView<'a> {
         if let Some(search_context) = search_context {
             list_state.restore_search(search_context);
         }
-        self.update_search_status(None);
+        match self.as_list_state().search_state() {
+            SearchState::Searching { .. } => self.update_search_status(),
+            SearchState::Applied { .. } => self.update_matched_message(),
+            SearchState::Inactive => {}
+        }
     }
 }

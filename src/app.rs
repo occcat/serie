@@ -7,7 +7,7 @@ use ratatui::{
     crossterm::event::{KeyCode, KeyEvent},
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style, Stylize},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Borders, Padding, Paragraph},
     DefaultTerminal, Frame,
 };
@@ -24,6 +24,7 @@ use crate::{
     graph::{CellWidthType, Graph, GraphImageManager},
     keybind::KeyBind,
     protocol::ImageProtocol,
+    search::SearchOptions,
     view::{RefreshViewContext, View},
     widget::commit_list::{CommitInfo, CommitListState, SearchState},
 };
@@ -32,8 +33,17 @@ use crate::{
 enum StatusLine {
     #[default]
     None,
-    Input(String, Option<u16>, Option<String>),
+    Input {
+        message: String,
+        cursor_position: u16,
+        metadata: String,
+    },
     Transient(String),
+    SearchResult {
+        message: String,
+        options: String,
+        matched: bool,
+    },
     NotificationInfo(String),
     NotificationSuccess(String),
     NotificationWarn(String),
@@ -121,8 +131,11 @@ impl<'a> App<'a> {
             graph_cell_width,
             head,
             ref_name_to_commit_index_map,
-            ctx.core_config.search.ignore_case,
-            ctx.core_config.search.fuzzy,
+            SearchOptions {
+                target: ctx.core_config.search.target,
+                ignore_case: ctx.core_config.search.ignore_case,
+                fuzzy: ctx.core_config.search.fuzzy,
+            },
         );
         if let InitialSelection::Head = initial_selection {
             match repository.head() {
@@ -170,10 +183,11 @@ impl App<'_> {
             match self.ec.recv() {
                 AppEvent::Key(key) => {
                     match self.app_status.status_line {
-                        StatusLine::None | StatusLine::Input(_, _, _) => {
+                        StatusLine::None | StatusLine::Input { .. } => {
                             // do nothing
                         }
                         StatusLine::Transient(_)
+                        | StatusLine::SearchResult { .. }
                         | StatusLine::NotificationInfo(_)
                         | StatusLine::NotificationSuccess(_)
                         | StatusLine::NotificationWarn(_) => {
@@ -208,7 +222,7 @@ impl App<'_> {
                             self.app_status.numeric_prefix.clear();
                         }
                         None => {
-                            if let StatusLine::Input(_, _, _) = self.app_status.status_line {
+                            if let StatusLine::Input { .. } = self.app_status.status_line {
                                 // In input mode, pass all key events to the view
                                 // fixme: currently, the only thing that processes key_event is searching the list,
                                 //        so this probably works, but it's not the right process...
@@ -294,11 +308,22 @@ impl App<'_> {
                 AppEvent::ClearStatusLine => {
                     self.clear_status_line();
                 }
-                AppEvent::UpdateStatusInput(msg, cursor_pos, msg_r) => {
-                    self.update_status_input(msg, cursor_pos, msg_r);
+                AppEvent::UpdateStatusInput {
+                    message,
+                    cursor_position,
+                    metadata,
+                } => {
+                    self.update_status_input(message, cursor_position, metadata);
                 }
                 AppEvent::UpdateStatusTransient(msg) => {
                     self.update_status_transient(msg);
+                }
+                AppEvent::UpdateSearchResult {
+                    message,
+                    options,
+                    matched,
+                } => {
+                    self.update_search_result(message, options, matched);
                 }
                 AppEvent::NotifyInfo(msg) => {
                     self.info_notification(msg);
@@ -387,23 +412,15 @@ impl App<'_> {
                         .fg(self.ctx.color_theme.status_input_transient_fg)
                 }
             }
-            StatusLine::Input(msg, _, transient_msg) => {
-                let msg_w = console::measure_text_width(msg.as_str());
-                if let Some(t_msg) = transient_msg {
-                    let t_msg_w = console::measure_text_width(t_msg.as_str());
-                    let pad_w =
-                        (area.width as usize).saturating_sub(msg_w + t_msg_w + 2 /* pad */);
-                    Line::from(vec![
-                        msg.as_str().fg(self.ctx.color_theme.status_input_fg),
-                        " ".repeat(pad_w).into(),
-                        t_msg
-                            .as_str()
-                            .fg(self.ctx.color_theme.status_input_transient_fg),
-                    ])
-                } else {
-                    Line::raw(msg).fg(self.ctx.color_theme.status_input_fg)
-                }
-            }
+            StatusLine::Input {
+                message, metadata, ..
+            } => status_line_with_metadata(
+                message,
+                metadata,
+                Style::default().fg(self.ctx.color_theme.status_input_fg),
+                Style::default().fg(self.ctx.color_theme.status_input_transient_fg),
+                area.width,
+            ),
             StatusLine::Transient(msg) => {
                 let msg_w = console::measure_text_width(msg.as_str());
                 let pad_w = (area.width as usize).saturating_sub(msg_w + 2 /* pad */);
@@ -412,6 +429,26 @@ impl App<'_> {
                     msg.as_str()
                         .fg(self.ctx.color_theme.status_input_transient_fg),
                 ])
+            }
+            StatusLine::SearchResult {
+                message,
+                options,
+                matched,
+            } => {
+                let message_style = if *matched {
+                    Style::default().fg(self.ctx.color_theme.status_info_fg)
+                } else {
+                    Style::default()
+                        .fg(self.ctx.color_theme.status_warn_fg)
+                        .add_modifier(Modifier::BOLD)
+                };
+                status_line_with_metadata(
+                    message,
+                    options,
+                    message_style,
+                    Style::default().fg(self.ctx.color_theme.status_input_transient_fg),
+                    area.width,
+                )
             }
             StatusLine::NotificationInfo(msg) => {
                 Line::raw(msg).fg(self.ctx.color_theme.status_info_fg)
@@ -434,8 +471,11 @@ impl App<'_> {
         );
         f.render_widget(paragraph, area);
 
-        if let StatusLine::Input(_, Some(cursor_pos), _) = &self.app_status.status_line {
-            let (x, y) = (area.x + cursor_pos + 1, area.y + 1);
+        if let StatusLine::Input {
+            cursor_position, ..
+        } = &self.app_status.status_line
+        {
+            let (x, y) = (area.x + cursor_position + 1, area.y + 1);
             match &self.ctx.ui_config.common.cursor_type {
                 CursorType::Native => {
                     f.set_cursor_position((x, y));
@@ -729,31 +769,47 @@ impl App<'_> {
             return;
         };
         let list_state = view.as_list_state();
-        if !matches!(list_state.search_state(), SearchState::Searching { .. }) {
-            return;
+        match list_state.search_state() {
+            SearchState::Searching { .. } => {
+                let Some(query) = list_state.search_query_string() else {
+                    return;
+                };
+                let cursor_position = list_state.search_query_cursor_position();
+                let metadata = list_state.search_options().status_string();
+                self.update_status_input(query, cursor_position, metadata);
+            }
+            SearchState::Applied { .. } => {
+                if let Some((message, matched)) = list_state.matched_query_string() {
+                    let options = list_state.search_options().status_string();
+                    self.update_search_result(message, options, matched);
+                }
+            }
+            SearchState::Inactive => {}
         }
-        let Some(query) = list_state.search_query_string() else {
-            return;
-        };
-        let cursor_pos = list_state.search_query_cursor_position();
-        self.update_status_input(query, Some(cursor_pos), None);
     }
 
     fn clear_status_line(&mut self) {
         self.app_status.status_line = StatusLine::None;
     }
 
-    fn update_status_input(
-        &mut self,
-        msg: String,
-        cursor_pos: Option<u16>,
-        transient_msg: Option<String>,
-    ) {
-        self.app_status.status_line = StatusLine::Input(msg, cursor_pos, transient_msg);
+    fn update_status_input(&mut self, message: String, cursor_position: u16, metadata: String) {
+        self.app_status.status_line = StatusLine::Input {
+            message,
+            cursor_position,
+            metadata,
+        };
     }
 
     fn update_status_transient(&mut self, msg: String) {
         self.app_status.status_line = StatusLine::Transient(msg);
+    }
+
+    fn update_search_result(&mut self, message: String, options: String, matched: bool) {
+        self.app_status.status_line = StatusLine::SearchResult {
+            message,
+            options,
+            matched,
+        };
     }
 
     fn info_notification(&mut self, msg: String) {
@@ -783,6 +839,30 @@ impl App<'_> {
             }
         }
     }
+}
+
+fn status_line_with_metadata(
+    message: &str,
+    metadata: &str,
+    message_style: Style,
+    metadata_style: Style,
+    area_width: u16,
+) -> Line<'static> {
+    let content_width = area_width.saturating_sub(2) as usize;
+    let message_width = console::measure_text_width(message);
+    let metadata_width = console::measure_text_width(metadata);
+    let min_gap_width = 2;
+
+    if message_width + min_gap_width + metadata_width > content_width {
+        return Line::from(Span::styled(message.to_owned(), message_style));
+    }
+
+    let pad_width = content_width - message_width - metadata_width;
+    Line::from(vec![
+        Span::styled(message.to_owned(), message_style),
+        Span::raw(" ".repeat(pad_width)),
+        Span::styled(metadata.to_owned(), metadata_style),
+    ])
 }
 
 fn selected_commit_details(
@@ -915,5 +995,25 @@ mod tests {
         let dummy_key_event = KeyEvent::from(KeyCode::Enter); // KeyEvent is not used in the logic
         let actual = process_numeric_prefix(numeric_prefix, user_event, dummy_key_event);
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_status_line_with_metadata_right_aligns_metadata() {
+        let line =
+            status_line_with_metadata("left", "[meta]", Style::default(), Style::default(), 14);
+
+        assert_eq!(line.spans.len(), 3);
+        assert_eq!(line.spans[0].content.as_ref(), "left");
+        assert_eq!(line.spans[1].content.as_ref(), "  ");
+        assert_eq!(line.spans[2].content.as_ref(), "[meta]");
+    }
+
+    #[test]
+    fn test_status_line_with_metadata_hides_metadata_when_area_is_too_narrow() {
+        let line =
+            status_line_with_metadata("left", "[meta]", Style::default(), Style::default(), 13);
+
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(line.spans[0].content.as_ref(), "left");
     }
 }

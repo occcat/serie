@@ -73,6 +73,10 @@ struct Args {
     #[arg(long)]
     fetch: bool,
 
+    /// Inset the whole UI by this many cells on every side
+    #[arg(long, value_name = "CELLS", default_value_t = 0)]
+    padding: u16,
+
     /// Path to a git repository [default: current directory]
     #[arg(value_name = "PATH")]
     path: Option<PathBuf>,
@@ -199,6 +203,7 @@ fn main() -> Result<()> {
         ui_config,
         color_theme,
         image_protocol,
+        page_padding: args.padding,
     });
 
     let ec = event::EventController::new(auto_refresh, fetch);

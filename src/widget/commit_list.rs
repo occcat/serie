@@ -236,14 +236,16 @@ impl<'a> CommitListState<'a> {
     pub fn update_height(&mut self, height: usize) {
         self.height = height;
 
-        if self.total > self.height && self.total - self.height < self.offset {
-            let diff = self.offset - (self.total - self.height);
+        if self.total > self.height && self.total.saturating_sub(self.height) < self.offset {
+            let diff = self
+                .offset
+                .saturating_sub(self.total.saturating_sub(self.height));
             self.selected += diff;
-            self.offset -= diff;
+            self.offset = self.offset.saturating_sub(diff);
         }
         if self.selected >= self.height {
-            let diff = self.selected - self.height + 1;
-            self.selected -= diff;
+            let diff = self.selected.saturating_sub(self.height).saturating_add(1);
+            self.selected = self.selected.saturating_sub(diff);
             self.offset += diff;
         }
     }
@@ -279,9 +281,14 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn select_next(&mut self) {
-        if self.selected < (self.total - 1).min(self.height - 1) {
+        if self.selected
+            < self
+                .total
+                .saturating_sub(1)
+                .min(self.height.saturating_sub(1))
+        {
             self.selected += 1;
-        } else if self.selected + self.offset < self.total - 1 {
+        } else if self.selected + self.offset < self.total.saturating_sub(1) {
             self.offset += 1;
         }
     }
@@ -317,9 +324,12 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn select_last(&mut self) {
-        self.selected = (self.height - 1).min(self.total - 1);
+        self.selected = self
+            .height
+            .saturating_sub(1)
+            .min(self.total.saturating_sub(1));
         if self.height < self.total {
-            self.offset = self.total - self.height;
+            self.offset = self.total.saturating_sub(self.height);
         }
     }
 
@@ -335,7 +345,7 @@ impl<'a> CommitListState<'a> {
     pub fn scroll_up(&mut self) {
         if self.offset > 0 {
             self.offset -= 1;
-            if self.selected < self.height - 1 {
+            if self.selected < self.height.saturating_sub(1) {
                 self.selected += 1;
             }
         }
@@ -363,10 +373,10 @@ impl<'a> CommitListState<'a> {
         } else {
             let old_offset = self.offset;
             let size = self.height.min(self.total);
-            self.offset = self.total - size;
-            self.selected += scroll_height - (self.offset - old_offset);
+            self.offset = self.total.saturating_sub(size);
+            self.selected += scroll_height.saturating_sub(self.offset.saturating_sub(old_offset));
             if self.selected >= size {
-                self.selected = size - 1;
+                self.selected = size.saturating_sub(1);
             }
         }
     }
@@ -397,9 +407,9 @@ impl<'a> CommitListState<'a> {
 
     pub fn select_low(&mut self) {
         if self.total > self.height {
-            self.selected = self.height - 1;
+            self.selected = self.height.saturating_sub(1);
         } else {
-            self.selected = self.total - 1;
+            self.selected = self.total.saturating_sub(1);
         }
     }
 
@@ -683,7 +693,7 @@ impl<'a> CommitListState<'a> {
                     .update_match_index(self.search_matches[i].match_index);
                 return;
             }
-            if i == self.total - 1 {
+            if i == self.total.saturating_sub(1) {
                 i = 0;
             } else {
                 i += 1;
@@ -701,7 +711,7 @@ impl<'a> CommitListState<'a> {
                 return;
             }
             if i == 0 {
-                i = self.total - 1;
+                i = self.total.saturating_sub(1);
             } else {
                 i -= 1;
             }

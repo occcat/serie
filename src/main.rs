@@ -7,6 +7,7 @@ mod external;
 mod git;
 mod graph;
 mod keybind;
+mod padding;
 mod protocol;
 mod view;
 mod widget;
@@ -71,6 +72,10 @@ struct Args {
     /// Run `git fetch --all` before each auto-refresh (implies --auto-refresh)
     #[arg(long)]
     fetch: bool,
+
+    /// Inset the whole UI by this many cells on every side
+    #[arg(long, value_name = "CELLS", default_value_t = 0)]
+    padding: u16,
 
     /// Path to a git repository [default: current directory]
     #[arg(value_name = "PATH")]
@@ -198,6 +203,7 @@ fn main() -> Result<()> {
         ui_config,
         color_theme,
         image_protocol,
+        page_padding: args.padding,
     });
 
     let ec = event::EventController::new(auto_refresh, fetch);
@@ -212,7 +218,7 @@ fn main() -> Result<()> {
 
         let graph = graph::calc_graph(&repository);
 
-        let cell_width_type = check::decide_cell_width_type(&graph, graph_width)?;
+        let cell_width_type = check::decide_cell_width_type(&graph, graph_width, args.padding)?;
 
         let graph_image_manager = GraphImageManager::new(
             &graph,

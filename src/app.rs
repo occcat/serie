@@ -23,6 +23,7 @@ use crate::{
     git::{self, Commit, FileChange, Head, Ref, Repository},
     graph::{CellWidthType, Graph, GraphImageManager},
     keybind::KeyBind,
+    padding::{clamp_uniform, inset_rect, shrink_to_fit_graph},
     protocol::ImageProtocol,
     view::{RefreshViewContext, View},
     widget::commit_list::{CommitInfo, CommitListState, SearchState},
@@ -64,6 +65,7 @@ pub struct AppContext {
     pub ui_config: UiConfig,
     pub color_theme: ColorTheme,
     pub image_protocol: ImageProtocol,
+    pub page_padding: u16,
 }
 
 #[derive(Debug, Default)]
@@ -81,6 +83,7 @@ pub struct App<'a> {
     ctx: Rc<AppContext>,
     ec: &'a EventController,
     fingerprint: u64,
+    graph_cell_width: u16,
 }
 
 impl<'a> App<'a> {
@@ -140,6 +143,7 @@ impl<'a> App<'a> {
             ctx,
             ec,
             fingerprint: git::state_fingerprint(repository.path()),
+            graph_cell_width,
         };
 
         if let Some(context) = refresh_view_context {
@@ -318,7 +322,7 @@ impl App<'_> {
 
     fn prepare_render(&mut self, terminal: &mut DefaultTerminal) -> Result<(), std::io::Error> {
         let area: Rect = terminal.size()?.into();
-        let [view_area, _] = split_app_areas(area);
+        let [view_area, _] = split_app_areas(self.content_area(area));
         self.update_state(view_area);
         self.view.update_layout(view_area);
         self.view.prepare_graph_uploads();
@@ -367,12 +371,26 @@ impl App<'_> {
             .bg(self.ctx.color_theme.bg);
         f.render_widget(base, f.area());
 
-        let [view_area, status_line_area] = split_app_areas(f.area());
+        let [view_area, status_line_area] = split_app_areas(self.content_area(f.area()));
 
         self.update_state(view_area);
 
         self.view.render(f, view_area);
         self.render_status_line(f, status_line_area);
+    }
+
+    fn content_area(&self, area: Rect) -> Rect {
+        inset_rect(area, self.effective_padding(area))
+    }
+
+    fn effective_padding(&self, area: Rect) -> u16 {
+        let mut pad = clamp_uniform(self.ctx.page_padding, area.width, area.height);
+        let remaining = area.width.saturating_sub(pad.saturating_mul(2));
+        let required = self.graph_cell_width.saturating_add(2);
+        if required > remaining {
+            pad = shrink_to_fit_graph(pad, area.width, required);
+        }
+        pad
     }
 }
 

@@ -21,6 +21,10 @@ mod graph_tests;
 #[path = "tests/mailmap.rs"]
 mod mailmap_tests;
 
+#[cfg(test)]
+#[path = "tests/git.rs"]
+mod test_git;
+
 use std::{
     path::{Path, PathBuf},
     rc::Rc,

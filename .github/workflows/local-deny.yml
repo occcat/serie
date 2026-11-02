@@ -1,0 +1,38 @@
+name: Deny (MacBook M1)
+
+on:
+  push:
+    branches:
+      - '*'
+    paths:
+      - '**/Cargo.lock'
+      - '**/Cargo.toml'
+      - '**/deny.toml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - '**/Cargo.lock'
+      - '**/Cargo.toml'
+      - '**/deny.toml'
+
+  workflow_dispatch:
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cargo-deny:
+    runs-on: [self-hosted, macOS, ARM64, occcat-m1]
+    if: github.actor == 'occcat' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b
+        with:
+          tool: cargo-deny@0.19.2
+      - name: Check licenses
+        run: cargo deny --all-features check licenses
+    timeout-minutes: 60

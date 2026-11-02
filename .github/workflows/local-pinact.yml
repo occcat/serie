@@ -1,0 +1,30 @@
+name: Pinact (MacBook M1)
+
+on:
+  push:
+    branches:
+      - '*'
+    paths:
+      - .github/**
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/**
+
+  workflow_dispatch:
+jobs:
+  pinact:
+    runs-on: [self-hosted, macOS, ARM64, occcat-m1]
+    if: github.actor == 'occcat' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Pinact
+        uses: suzuki-shunsuke/pinact-action@cf51507d80d4d6522a07348e3d58790290eaf0b6 # v2.0.0
+        with:
+          skip_push: "true"
+          verify: "true"
